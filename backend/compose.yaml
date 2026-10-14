@@ -1,0 +1,17 @@
+services:
+  battery-backend:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-13013}:8000"
+    environment:
+      STATE_FILE: /data/state.json
+      API_TOKEN: ${API_TOKEN:-}
+      HA_WEBHOOK_URL: ${HA_WEBHOOK_URL:-}
+      ALERT_THRESHOLD_PERCENT: ${ALERT_THRESHOLD_PERCENT:-30}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    volumes:
+      - battery-state:/data
+
+volumes:
+  battery-state:
