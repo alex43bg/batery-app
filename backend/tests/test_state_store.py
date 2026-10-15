@@ -30,8 +30,10 @@ class JsonStateStoreTests(unittest.TestCase):
             charge_hours=2.5,
             load_rate=4,
             charge_watts=97,
+            full_charge_discharge_delay_minutes=15,
         )
-        asyncio.run(self.store.update_state(update))
+        with patch("app.state_store._now_ms", return_value=1_000):
+            asyncio.run(self.store.update_state(update))
 
         restored = JsonStateStore(
             state_file=self.state_file,
@@ -39,8 +41,145 @@ class JsonStateStoreTests(unittest.TestCase):
             alert_threshold_percent=30,
         )
 
-        self.assertAlmostEqual(asyncio.run(restored.get_state()).percent, 65, delta=0.01)
-        self.assertEqual(json.loads(self.state_file.read_text())["mode"], "discharging")
+        with patch("app.state_store._now_ms", return_value=901_000):
+            restored_state = asyncio.run(restored.get_state())
+
+        self.assertAlmostEqual(restored_state.percent, 64, delta=0.01)
+        self.assertEqual(restored_state.updated_at_ms, 901_000)
+        self.assertEqual(restored_state.mode, "discharging")
+        persisted = json.loads(self.state_file.read_text())
+        self.assertEqual(persisted["mode"], "discharging")
+        self.assertEqual(persisted["full_charge_discharge_delay_minutes"], 15)
+
+    def test_update_without_delay_keeps_existing_delay_setting(self) -> None:
+        asyncio.run(
+            self.store.update_state(
+                StateUpdate(
+                    percent=65,
+                    mode="discharging",
+                    capacity=192,
+                    charge_hours=2.5,
+                    load_rate=4,
+                    charge_watts=97,
+                    full_charge_discharge_delay_minutes=15,
+                )
+            )
+        )
+        state = asyncio.run(
+            self.store.update_state(
+                StateUpdate(
+                    percent=64,
+                    mode="discharging",
+                    capacity=192,
+                    charge_hours=2.5,
+                    load_rate=4,
+                    charge_watts=97,
+                )
+            )
+        )
+        self.assertEqual(state.full_charge_discharge_delay_minutes, 15)
+
+    def test_full_charge_switches_to_discharging_after_configured_delay(self) -> None:
+        with patch("app.state_store._now_ms", return_value=1_000):
+            state = asyncio.run(
+                self.store.update_state(
+                    StateUpdate(
+                        percent=100,
+                        mode="charging",
+                        capacity=192,
+                        charge_hours=2.5,
+                        load_rate=4,
+                        charge_watts=97,
+                        full_charge_discharge_delay_minutes=10,
+                    )
+                )
+            )
+        self.assertEqual(state.mode, "charging")
+        self.assertEqual(state.full_charge_reached_at_ms, 1_000)
+
+        with patch("app.state_store._now_ms", return_value=600_999):
+            state = asyncio.run(self.store.get_state())
+        self.assertEqual(state.mode, "charging")
+
+        with patch("app.state_store._now_ms", return_value=601_000):
+            state = asyncio.run(self.store.get_state())
+        self.assertEqual(state.mode, "discharging")
+        self.assertTrue(state.auto_discharge_active)
+        self.assertIsNone(state.full_charge_reached_at_ms)
+
+    def test_full_charge_delay_starts_when_battery_reaches_100_percent(self) -> None:
+        with patch("app.state_store._now_ms", return_value=1_000):
+            state = asyncio.run(
+                self.store.update_state(
+                    StateUpdate(
+                        percent=99,
+                        mode="charging",
+                        capacity=192,
+                        charge_hours=1,
+                        load_rate=0,
+                        charge_watts=97,
+                        full_charge_discharge_delay_minutes=1,
+                    )
+                )
+            )
+
+        with patch("app.state_store._now_ms", return_value=37_000):
+            state = asyncio.run(self.store.get_state())
+        self.assertEqual(state.mode, "charging")
+        self.assertEqual(state.full_charge_reached_at_ms, 37_000)
+
+        with patch("app.state_store._now_ms", return_value=96_999):
+            state = asyncio.run(self.store.get_state())
+        self.assertEqual(state.mode, "charging")
+
+        with patch("app.state_store._now_ms", return_value=97_000):
+            state = asyncio.run(self.store.get_state())
+        self.assertEqual(state.mode, "discharging")
+
+    def test_stale_charging_update_does_not_reverse_automatic_discharge(self) -> None:
+        with patch("app.state_store._now_ms", return_value=1_000):
+            state = asyncio.run(
+                self.store.update_state(
+                    StateUpdate(
+                        percent=100,
+                        mode="charging",
+                        capacity=192,
+                        charge_hours=2.5,
+                        load_rate=4,
+                        charge_watts=97,
+                        full_charge_discharge_delay_minutes=0,
+                    )
+                )
+            )
+        self.assertEqual(state.mode, "discharging")
+        self.assertTrue(state.auto_discharge_active)
+        stale_charging_update = StateUpdate(
+            percent=100,
+            mode="charging",
+            capacity=192,
+            charge_hours=2.5,
+            load_rate=4,
+            charge_watts=97,
+            full_charge_discharge_delay_minutes=0,
+        )
+        with patch("app.state_store._now_ms", return_value=1_000):
+            state = asyncio.run(self.store.update_state(stale_charging_update))
+        self.assertEqual(state.mode, "discharging")
+
+        manual_charging_override = StateUpdate(
+            percent=100,
+            mode="charging",
+            capacity=192,
+            charge_hours=2.5,
+            load_rate=4,
+            charge_watts=97,
+            full_charge_discharge_delay_minutes=10,
+            manual_mode_change=True,
+        )
+        with patch("app.state_store._now_ms", return_value=2_000):
+            state = asyncio.run(self.store.update_state(manual_charging_override))
+        self.assertEqual(state.mode, "charging")
+        self.assertFalse(state.auto_discharge_active)
 
     def test_crossing_threshold_queues_one_persisted_alert(self) -> None:
         update = StateUpdate(

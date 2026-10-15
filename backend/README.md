@@ -8,27 +8,36 @@ above the threshold.
 
 ## Run with Docker Compose
 
+The single container serves both the frontend and API from the same address.
 From this directory:
 
 ```powershell
-Copy-Item .env.example .env
-# Set API_TOKEN to a random value of at least 32 characters, and set
+Copy-Item setup.env.example setup.env
+# Set API_TOKEN to a value of at least 5 characters, and set
 # HA_WEBHOOK_URL to Home Assistant's webhook URL.
-docker compose up -d --build
+docker compose --env-file setup.env up -d --build
 ```
 
-The API listens on container port `8000`; the host port defaults to `13013` and
-can be changed with `BACKEND_PORT`. For example, `http://<server-ip>:13013/api/health`.
+The app listens on host port `13013` by default (configurable with
+`BACKEND_PORT`). Open `http://<server-ip>:13013/` for the frontend and
+`http://<server-ip>:13013/api/health` for its health check. The browser uses
+the same origin for API requests, so a separate frontend container and
+cross-origin configuration are not needed.
 Port `130130` is not valid: TCP/UDP ports range from 1 to 65535.
+Compose loads application settings from `setup.env`. Pass `--env-file setup.env`
+as shown above so Compose also uses its `BACKEND_PORT` value for port mapping.
 
 `GET` and `PUT /api/state` require `Authorization: Bearer <API_TOKEN>`. The token
 is not returned by the API. Keep it private and use HTTPS or a trusted VPN when
 connecting over an untrusted network; the sample direct-IP HTTP URL is suitable
 only for local/private-network setup.
 
-The named `battery-state` volume keeps `state.json` across container recreation.
-The JSON file is atomically replaced on updates; this service is intended to run
-as a single container instance.
+The named `battery-state` volume keeps `state.json` across container recreation
+and server restarts; do not remove the volume if you need to retain the state.
+The JSON file is atomically replaced and flushed to disk on updates. Its saved
+timestamp is used after a restart to advance the estimated percentage through
+the time the server was offline, while preserving the operating mode and
+settings. This service is intended to run as a single container instance.
 
 ## API
 
@@ -50,7 +59,7 @@ Example update:
 }
 ```
 
-Set `ALERT_THRESHOLD_PERCENT` (default `30`) and `HA_WEBHOOK_URL` in `.env`.
+Set `ALERT_THRESHOLD_PERCENT` (default `30`) and `HA_WEBHOOK_URL` in `setup.env`.
 The automatic alert and manual test both send an empty `POST`, matching the
 standalone webhook test page. If no webhook URL is configured, the alert remains
 pending and is delivered after a URL is configured and the container restarts.
@@ -60,18 +69,22 @@ service sends the same empty `POST` as the manual webhook test. After Home
 Assistant accepts it, the shared battery mode switches to charging. The
 threshold is stored with the shared state and can be changed from the frontend.
 
-`CORS_ORIGINS` is a comma-separated list of allowed frontend origins. Its
-default `*` is convenient for initial setup only; CORS is not authentication.
-Set it to the exact frontend origin for production. Do not expose the API
-directly to the public internet over plain HTTP.
+After charging reaches 100%, the backend switches the shared mode back to
+discharging after the configured `full_charge_discharge_delay_minutes`
+(default `10`; `0` switches immediately). The delay is stored in the shared
+state and is editable in the frontend settings.
+
+`CORS_ORIGINS` is only needed when another origin accesses the API. For the
+bundled same-origin frontend, it does not need to be configured. CORS is not
+authentication. Do not expose the API directly to the public internet over
+plain HTTP.
 
 ## Frontend connection
 
-Set `window.BATTERY_API_URL` before the page's main script to the backend's
-HTTPS URL, and set `CORS_ORIGINS` to the frontend's origin. In the page's
-settings dialog, enter the `API_TOKEN` value from `.env`; it is stored in that
-browser's local storage. Serve the frontend over HTTPS with an HTTPS API
-endpoint to avoid browser mixed-content restrictions.
+For a separate frontend deployment, set `window.BATTERY_API_URL` before the
+page's main script to the backend URL and allow the frontend origin in
+`CORS_ORIGINS`. With the bundled frontend, open `http://<server-ip>:13013/`
+and enter the `API_TOKEN` value from `setup.env` in Settings.
 
 ## Tests
 

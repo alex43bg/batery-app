@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
-$envFile = Join-Path $PSScriptRoot ".env"
+$envFile = Join-Path $PSScriptRoot "setup.env"
 if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
-    throw "Missing $envFile. Create it from .env.example and set API_TOKEN."
+    throw "Missing $envFile. Create it from setup.env.example and set API_TOKEN."
 }
 
 $tokenLine = Get-Content -LiteralPath $envFile |
@@ -10,6 +10,9 @@ $tokenLine = Get-Content -LiteralPath $envFile |
     Select-Object -First 1
 $webhookLine = Get-Content -LiteralPath $envFile |
     Where-Object { $_ -match '^\s*HA_WEBHOOK_URL\s*=' } |
+    Select-Object -First 1
+$alertThresholdLine = Get-Content -LiteralPath $envFile |
+    Where-Object { $_ -match '^\s*ALERT_THRESHOLD_PERCENT\s*=' } |
     Select-Object -First 1
 if (-not $tokenLine) {
     throw "API_TOKEN is missing from $envFile."
@@ -34,8 +37,29 @@ if (
 ) {
     $webhookUrl = $webhookUrl.Substring(1, $webhookUrl.Length - 2)
 }
-if ($apiToken.Length -lt 32) {
-    throw "API_TOKEN in $envFile must contain at least 32 characters."
+$alertThresholdPercent = "30"
+if ($alertThresholdLine) {
+    $alertThresholdPercent = ($alertThresholdLine -replace '^\s*ALERT_THRESHOLD_PERCENT\s*=', '').Trim()
+    if (
+        $alertThresholdPercent.Length -ge 2 -and
+        (($alertThresholdPercent[0] -eq '"' -and $alertThresholdPercent[-1] -eq '"') -or
+            ($alertThresholdPercent[0] -eq "'" -and $alertThresholdPercent[-1] -eq "'"))
+    ) {
+        $alertThresholdPercent = $alertThresholdPercent.Substring(1, $alertThresholdPercent.Length - 2)
+    }
+    $parsedAlertThresholdPercent = 0.0
+    $isValidAlertThreshold = [double]::TryParse(
+        $alertThresholdPercent,
+        [Globalization.NumberStyles]::Float,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [ref]$parsedAlertThresholdPercent
+    )
+    if (-not $isValidAlertThreshold -or $parsedAlertThresholdPercent -lt 0 -or $parsedAlertThresholdPercent -gt 100) {
+        throw "ALERT_THRESHOLD_PERCENT in $envFile must be between 0 and 100."
+    }
+}
+if ($apiToken.Length -lt 5) {
+    throw "API_TOKEN in $envFile must contain at least 5 characters."
 }
 if (
     -not [string]::IsNullOrWhiteSpace($webhookUrl) -and
@@ -59,7 +83,23 @@ if ($listener) {
 }
 
 $env:API_TOKEN = $apiToken
-$env:STATE_FILE = Join-Path $env:TEMP "battery-local-state.json"
+$env:ALERT_THRESHOLD_PERCENT = $alertThresholdPercent
+$stateDirectory = Join-Path $env:LOCALAPPDATA "BatteryMonitor"
+$env:STATE_FILE = Join-Path $stateDirectory "state.json"
+if (-not (Test-Path -LiteralPath $env:STATE_FILE -PathType Leaf)) {
+    $previousStateFiles = @(
+        (Join-Path $PSScriptRoot "data\state.json"),
+        (Join-Path $env:TEMP "battery-local-state.json")
+    )
+    $previousStateFile = $previousStateFiles |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        Select-Object -First 1
+    if ($previousStateFile) {
+        New-Item -ItemType Directory -Path $stateDirectory -Force | Out-Null
+        Copy-Item -LiteralPath $previousStateFile -Destination $env:STATE_FILE
+        Write-Host "Restored saved battery state from $previousStateFile"
+    }
+}
 $env:HA_WEBHOOK_URL = $webhookUrl
 $frontendOrigins = [System.Collections.Generic.List[string]]::new()
 $frontendOrigins.Add("http://127.0.0.1:5500")

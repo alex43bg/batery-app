@@ -340,11 +340,16 @@
         <input id="charge-watts" type="number" min="1" max="10000" step="1">
         <p class="field-help">Інформаційне значення для вашого зарядного пристрою.</p>
       </div>
+      <div class="field">
+        <label for="full-charge-discharge-delay">Затримка після 100% до розряджання (хв)</label>
+        <input id="full-charge-discharge-delay" type="number" min="0" max="1440" step="1">
+        <p class="field-help">0 — перемкнути одразу; за замовчуванням — 10 хвилин.</p>
+      </div>
     </div>
     <section class="settings-connection" aria-label="Підключення до бекенду">
       <label for="api-token">Ключ доступу до бекенду</label>
-      <input id="api-token" type="password" autocomplete="current-password">
-      <p class="field-help">Значення API_TOKEN з backend/.env зберігається в цьому браузері.</p>
+      <input id="api-token" name="battery-api-token" type="text" minlength="5" inputmode="text" enterkeyhint="done" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+      <p class="field-help">Вставте API_TOKEN із backend/setup.env. Поле показує введений ключ, щоб перевірити вставлення; не відкривайте налаштування на чужому пристрої.</p>
       <div class="settings-actions">
         <button class="secondary-button" id="save-api-token" type="button">Під’єднати сервер</button>
         <button class="secondary-button" id="reset-api-token" type="button">Скинути збережений токен</button>
@@ -366,7 +371,9 @@
   </dialog>
   <script>
     window.BATTERY_API_URL = window.BATTERY_API_URL ||
-      `${window.location.protocol}//${window.location.hostname}:8000`;
+      (window.location.port === "5500"
+        ? `${window.location.protocol}//${window.location.hostname}:8000`
+        : window.location.origin);
   </script>
   <script>
     (() => {
@@ -379,6 +386,7 @@
         chargeHours: 2.5,
         loadRate: 4,
         chargeWatts: 97,
+        fullChargeDischargeDelayMinutes: 10,
         alertThresholdPercent: 30
       };
       const storageKey = "power-bank-monitor-v1";
@@ -393,7 +401,7 @@
         const message = error instanceof Error ? error.message : String(error);
         const statusCode = message.match(/API returned HTTP (\d+)/)?.[1];
         if (statusCode === "401") {
-          backendStatus.textContent = "Бекенд відхилив ключ (HTTP 401). Перезапустіть його та перевірте API_TOKEN у backend/.env.";
+          backendStatus.textContent = "Бекенд доступний, але відхилив API_TOKEN (HTTP 401). Скиньте збережений токен і вставте точне значення з setup.env на сервері.";
         } else if (statusCode) {
           backendStatus.textContent = `Помилка бекенду HTTP ${statusCode}. Перевірте його журнали.`;
         } else {
@@ -439,7 +447,8 @@
         capacity: $("capacity"),
         chargeHours: $("charge-hours"),
         loadRate: $("load-rate"),
-        chargeWatts: $("charge-watts")
+        chargeWatts: $("charge-watts"),
+        fullChargeDischargeDelayMinutes: $("full-charge-discharge-delay")
       };
       const applyBackendState = (remoteState) => {
         backendPercent = remoteState.percent;
@@ -452,6 +461,7 @@
           chargeHours: remoteState.charge_hours,
           loadRate: remoteState.load_rate,
           chargeWatts: remoteState.charge_watts,
+          fullChargeDischargeDelayMinutes: remoteState.full_charge_discharge_delay_minutes,
           alertThresholdPercent: remoteState.alert_threshold_percent
         };
         setThresholdOptions(state.alertThresholdPercent);
@@ -505,6 +515,7 @@
               charge_hours: snapshot.chargeHours,
               load_rate: snapshot.loadRate,
               charge_watts: snapshot.chargeWatts,
+              full_charge_discharge_delay_minutes: snapshot.fullChargeDischargeDelayMinutes,
               alert_threshold_percent: snapshot.alertThresholdPercent,
               manual_mode_change: manualModeChange
             })
@@ -686,9 +697,10 @@
         input.value = state[key];
         input.addEventListener("change", () => {
           const value = Number(input.value);
-          const max = key === "loadRate" ? 100 : 10000;
-          const min = key === "chargeHours" ? 0.1 : 1;
-          if (!Number.isFinite(value) || value < min || value > max) {
+          const isDelay = key === "fullChargeDischargeDelayMinutes";
+          const max = key === "loadRate" ? 100 : isDelay ? 1440 : 10000;
+          const min = key === "chargeHours" ? 0.1 : isDelay ? 0 : 1;
+          if (!Number.isFinite(value) || value < min || value > max || (isDelay && !Number.isInteger(value))) {
             input.value = state[key];
             return;
           }
@@ -723,25 +735,59 @@
       $("open-settings").addEventListener("click", () => settingsDialog.showModal());
       $("close-settings").addEventListener("click", () => settingsDialog.close());
       settingsDialog.addEventListener("close", () => void loadBackendState());
-      $("save-api-token").addEventListener("click", () => {
+      $("save-api-token").addEventListener("click", async (event) => {
+        const button = event.currentTarget;
         const token = apiTokenInput.value.trim();
-        if (token.length < 32) {
-          apiTokenInput.setCustomValidity("Введіть ключ довжиною щонайменше 32 символи.");
+        if (token.length < 5) {
+          apiTokenInput.setCustomValidity("Введіть ключ довжиною щонайменше 5 символів.");
           apiTokenInput.reportValidity();
           return;
         }
         apiTokenInput.setCustomValidity("");
         apiTokenInput.value = token;
-        localStorage.setItem(apiTokenStorageKey, token);
-        void loadBackendState();
+        button.disabled = true;
+        $("api-token-status").textContent = "Перевірка ключа...";
+        try {
+          const response = await fetch(`${apiBaseUrl}/api/state`, {
+            headers: { "Authorization": `Bearer ${token}` }
+          });
+          if (!response.ok) throw new Error(`API returned HTTP ${response.status}`);
+          const remoteState = await response.json();
+          localStorage.setItem(apiTokenStorageKey, token);
+          backendTokenValidated = true;
+          if (remoteState.initialized) {
+            applyBackendState(remoteState);
+            backendStatus.textContent = "";
+          } else {
+            updateProgress(Date.now());
+            await syncState();
+            render();
+          }
+          if (backendTokenValidated) {
+            $("api-token-status").textContent = "Ключ прийнято; сервер під’єднано.";
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          $("api-token-status").textContent = message.includes("HTTP 401")
+            ? "Сервер відхилив цей ключ. Перевірте токен у setup.env на сервері; відхилений ключ не збережено."
+            : "Не вдалося перевірити ключ. Перевірте адресу API, мережу й CORS.";
+          showBackendError(error, "перевірити ключ доступу");
+        } finally {
+          button.disabled = false;
+        }
       });
       $("reset-api-token").addEventListener("click", () => {
-        localStorage.removeItem(apiTokenStorageKey);
-        backendTokenValidated = false;
-        apiTokenInput.value = "";
-        apiTokenInput.setCustomValidity("");
-        backendStatus.textContent = "";
-        $("api-token-status").textContent = "Збережений токен очищено в цьому браузері. Токен бекенду не змінено.";
+        try {
+          localStorage.removeItem(apiTokenStorageKey);
+          backendTokenValidated = false;
+          apiTokenInput.value = "";
+          apiTokenInput.setCustomValidity("");
+          backendStatus.textContent = "";
+          $("api-token-status").textContent = "Токен очищено для цього браузера й адреси сайту. Вставте актуальний ключ і натисніть «Під’єднати сервер».";
+        } catch (error) {
+          $("api-token-status").textContent = "Браузер не дозволив очистити локальне сховище. Очистьте дані цього сайту в налаштуваннях браузера.";
+          console.error("Не вдалося очистити збережений токен:", error);
+        }
       });
       $("send-test-webhook").addEventListener("click", async (event) => {
         const button = event.currentTarget;

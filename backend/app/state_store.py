@@ -20,6 +20,7 @@ ALERT_THRESHOLD_PERCENT = float(os.getenv("ALERT_THRESHOLD_PERCENT", "30"))
 HA_WEBHOOK_URL = os.getenv("HA_WEBHOOK_URL", "").strip()
 WEBHOOK_RETRY_INITIAL_SECONDS = 30
 WEBHOOK_RETRY_MAX_SECONDS = 900
+DEFAULT_FULL_CHARGE_DISCHARGE_DELAY_MINUTES = 10
 if not 0 <= ALERT_THRESHOLD_PERCENT <= 100:
     raise ValueError("ALERT_THRESHOLD_PERCENT must be between 0 and 100.")
 
@@ -38,6 +39,11 @@ class StateUpdate(BaseModel):
         ge=0,
         le=100,
     )
+    full_charge_discharge_delay_minutes: int = Field(
+        default=DEFAULT_FULL_CHARGE_DISCHARGE_DELAY_MINUTES,
+        ge=0,
+        le=1440,
+    )
     manual_mode_change: bool = Field(default=False, exclude=True)
 
 
@@ -52,6 +58,8 @@ class BatteryState(StateUpdate):
     initialized: bool = False
     alert_armed: bool = True
     auto_charge_active: bool = False
+    auto_discharge_active: bool = False
+    full_charge_reached_at_ms: int | None = None
     pending_alert: AlertEvent | None = None
     last_alert_sent_at_ms: int | None = None
 
@@ -116,12 +124,22 @@ class JsonStateStore:
                 temporary_file.flush()
                 os.fsync(temporary_file.fileno())
             os.replace(temporary_path, self.state_file)
+            if hasattr(os, "O_DIRECTORY"):
+                directory_fd = os.open(
+                    self.state_file.parent,
+                    os.O_RDONLY | os.O_DIRECTORY,
+                )
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
         finally:
             if temporary_path and os.path.exists(temporary_path):
                 os.unlink(temporary_path)
 
     def _advance(self, now_ms: int) -> None:
         previous_percent = self._state.percent
+        previous_updated_at_ms = self._state.updated_at_ms
         elapsed_hours = max(0, now_ms - self._state.updated_at_ms) / 3_600_000
         self._state.percent = calculate_percent(
             percent=self._state.percent,
@@ -131,6 +149,40 @@ class JsonStateStore:
             load_rate=self._state.load_rate,
         )
         self._state.updated_at_ms = now_ms
+
+        if self._state.mode == "charging" and self._state.percent >= 100:
+            if self._state.full_charge_reached_at_ms is None:
+                net_charge_rate = (
+                    100 / self._state.charge_hours - self._state.load_rate
+                )
+                if previous_percent >= 100 or net_charge_rate <= 0:
+                    reached_at_ms = previous_updated_at_ms
+                else:
+                    reached_at_ms = previous_updated_at_ms + round(
+                        (100 - previous_percent) / net_charge_rate * 3_600_000
+                    )
+                self._state.full_charge_reached_at_ms = min(now_ms, reached_at_ms)
+
+            delay_ms = self._state.full_charge_discharge_delay_minutes * 60_000
+            discharge_started_at_ms = self._state.full_charge_reached_at_ms + delay_ms
+            if now_ms >= discharge_started_at_ms:
+                elapsed_discharge_hours = (
+                    now_ms - discharge_started_at_ms
+                ) / 3_600_000
+                self._state.percent = calculate_percent(
+                    percent=100,
+                    mode="discharging",
+                    elapsed_hours=elapsed_discharge_hours,
+                    charge_hours=self._state.charge_hours,
+                    load_rate=self._state.load_rate,
+                )
+                self._state.mode = "discharging"
+                self._state.auto_charge_active = False
+                self._state.auto_discharge_active = True
+                self._state.full_charge_reached_at_ms = None
+                self._state.updated_at_ms = now_ms
+        elif self._state.percent < 100 or self._state.mode != "charging":
+            self._state.full_charge_reached_at_ms = None
 
         if self._state.percent > self.alert_threshold_percent:
             self._state.alert_armed = True
@@ -165,15 +217,26 @@ class JsonStateStore:
                 self.alert_threshold_percent != update.alert_threshold_percent
             )
             update_values = update.model_dump(exclude={"manual_mode_change"})
+            if "full_charge_discharge_delay_minutes" not in update.model_fields_set:
+                update_values.pop("full_charge_discharge_delay_minutes")
             if self._state.auto_charge_active and not update.manual_mode_change:
                 update_values["mode"] = "charging"
             elif update.manual_mode_change:
                 self._state.auto_charge_active = False
+                self._state.auto_discharge_active = False
+                self._state.full_charge_reached_at_ms = None
+            elif self._state.auto_discharge_active:
+                update_values["mode"] = "discharging"
             self._state = self._state.model_copy(
                 update={**update_values, "initialized": True},
                 deep=True,
             )
             self._state.updated_at_ms = now_ms
+            if self._state.mode == "charging" and self._state.percent >= 100:
+                if self._state.full_charge_reached_at_ms is None:
+                    self._state.full_charge_reached_at_ms = now_ms
+            else:
+                self._state.full_charge_reached_at_ms = None
             self.alert_threshold_percent = update.alert_threshold_percent
             if self._state.percent > self.alert_threshold_percent:
                 self._state.alert_armed = True
@@ -187,6 +250,7 @@ class JsonStateStore:
                 and self._state.pending_alert is None
             ):
                 self._queue_alert(now_ms)
+            self._advance(now_ms)
             self._persist()
             should_send_alert = (
                 self._state.pending_alert is not None and bool(self.webhook_url)
@@ -239,6 +303,12 @@ class JsonStateStore:
                     self._state.last_alert_sent_at_ms = _now_ms()
                     self._state.mode = "charging"
                     self._state.auto_charge_active = True
+                    self._state.auto_discharge_active = False
+                    self._state.full_charge_reached_at_ms = (
+                        self._state.last_alert_sent_at_ms
+                        if self._state.percent >= 100
+                        else None
+                    )
                     self._state.updated_at_ms = self._state.last_alert_sent_at_ms
                     self._persist()
 

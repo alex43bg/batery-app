@@ -1,8 +1,10 @@
 .env
+setup.env
 .venv/
 __pycache__/
 *.py[cod]
 backend/.env
+backend/setup.env
 backend/.venv/
 backend/__pycache__/
 backend/data/

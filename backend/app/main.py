@@ -4,18 +4,32 @@ import os
 import secrets
 import urllib.error
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from .state_store import BatteryState, JsonStateStore, StateUpdate
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
+_module_path = Path(__file__).resolve()
+FRONTEND_FILE = next(
+    (
+        path
+        for path in (
+            _module_path.parents[2] / "index.html",
+            _module_path.parents[1] / "index.html",
+        )
+        if path.is_file()
+    ),
+    _module_path.parents[1] / "index.html",
+)
 api_token = os.getenv("API_TOKEN", "").strip()
-if len(api_token) < 32:
-    raise RuntimeError("API_TOKEN must be configured with at least 32 characters.")
+if len(api_token) < 5:
+    raise RuntimeError("API_TOKEN must be configured with at least 5 characters.")
 
 cors_origins = [
     origin.strip()
@@ -70,6 +84,16 @@ app.add_middleware(
     allow_methods=["GET", "PUT", "POST"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+async def frontend() -> FileResponse:
+    return FileResponse(
+        FRONTEND_FILE,
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/health")
