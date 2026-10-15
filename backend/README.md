@@ -35,6 +35,7 @@ as a single container instance.
 - `GET /api/health` — liveness check.
 - `GET /api/state` — current state, with its estimated percentage advanced to now.
 - `PUT /api/state` — replace the battery settings and current percentage.
+- `POST /api/webhook/test` — send an empty `POST` request to the configured Home Assistant webhook, matching the standalone webhook test page (requires the bearer token).
 
 Example update:
 
@@ -50,10 +51,14 @@ Example update:
 ```
 
 Set `ALERT_THRESHOLD_PERCENT` (default `30`) and `HA_WEBHOOK_URL` in `.env`.
-The webhook receives a JSON `POST` containing `event`, `percent`,
-`threshold_percent`, and `created_at_ms`. If no webhook URL is configured, the
-alert remains pending and is delivered after a URL is configured and the
-container restarts.
+The automatic alert and manual test both send an empty `POST`, matching the
+standalone webhook test page. If no webhook URL is configured, the alert remains
+pending and is delivered after a URL is configured and the container restarts.
+
+When the battery is discharging and reaches the configured alert threshold, the
+service sends the same empty `POST` as the manual webhook test. After Home
+Assistant accepts it, the shared battery mode switches to charging. The
+threshold is stored with the shared state and can be changed from the frontend.
 
 `CORS_ORIGINS` is a comma-separated list of allowed frontend origins. Its
 default `*` is convenient for initial setup only; CORS is not authentication.

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import secrets
+import urllib.error
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -66,7 +67,7 @@ app = FastAPI(title="Battery Monitor API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_methods=["GET", "PUT"],
+    allow_methods=["GET", "PUT", "POST"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -88,3 +89,24 @@ async def get_state() -> BatteryState:
 )
 async def update_state(update: StateUpdate) -> BatteryState:
     return await state_store.update_state(update)
+
+
+@app.post(
+    "/api/webhook/test",
+    dependencies=[Depends(require_api_token)],
+)
+async def send_test_webhook() -> dict[str, str]:
+    if not state_store.webhook_url:
+        raise HTTPException(
+            status_code=503,
+            detail="HA_WEBHOOK_URL is not configured.",
+        )
+    try:
+        await state_store.send_test_webhook()
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        logger.error("Home Assistant test webhook failed: %s", error)
+        raise HTTPException(
+            status_code=502,
+            detail="Home Assistant rejected or could not receive the test webhook.",
+        ) from error
+    return {"status": "sent"}

@@ -22,6 +22,7 @@
       background: #101614;
     }
     * { box-sizing: border-box; }
+    html:has(dialog[open]) { overflow: hidden; }
     body {
       min-height: 100vh;
       min-height: 100dvh;
@@ -94,8 +95,9 @@
     .battery-fill.white-percent { color: #fff; }
     .percent { font-size: clamp(2.7rem, 13vw, 4.1rem); font-weight: 780; letter-spacing: -.07em; font-variant-numeric: tabular-nums; }
     .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-    .mode-label { min-height: 24px; color: var(--muted); text-align: center; font-size: .9rem; }
+    .mode-label { display: flex; min-height: 24px; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; color: var(--muted); text-align: center; font-size: .9rem; }
     .mode-label strong { color: var(--green); }
+    .backend-percent { color: #91a097; font-size: .78rem; font-variant-numeric: tabular-nums; }
     .time-card {
       display: flex;
       align-items: center;
@@ -149,10 +151,11 @@
     .settings-trigger-title { font-weight: 700; }
     .settings-dialog {
       width: min(calc(100% - 32px), 620px);
-      max-height: min(90vh, 800px);
+      max-height: min(calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)), 800px);
       margin: auto;
       padding: 22px;
       overflow: auto;
+      overscroll-behavior: contain;
       border: 1px solid var(--line);
       border-radius: 20px;
       background: #19211d;
@@ -179,8 +182,12 @@
     .stats-entry { display: flex; justify-content: space-between; gap: 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-variant-numeric: tabular-nums; }
     .stats-entry.low-charge { border-color: #8b762e; color: #f4d35e; }
     .stats-summary { display: grid; gap: 10px; margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #131a16; }
-    .stats-summary p { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 0; font-size: .88rem; }
+    .stats-summary p { display: grid; grid-template-columns: 68px minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 0; font-size: .88rem; }
     .stats-summary p > span:nth-child(2) { text-align: center; }
+    .threshold-select { width: 68px; padding: 2px 3px; border: 1px solid transparent; border-radius: 6px; appearance: none; background: transparent; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+    .threshold-select:hover, .threshold-select:focus-visible { border-color: #65776a; outline: none; background: #1c2520; }
+    .threshold-select option { background: #19211d; color: #f1f5f2; }
+    .stats-summary .threshold-select { color: #f4d35e; }
     .stats-summary time { text-align: left; font-variant-numeric: tabular-nums; }
     .stats-summary time span { display: inline-block; padding: 2px 7px; border-radius: 6px; background: #29352e; color: #f1f5f2; font-weight: 700; }
     .stats-summary .low-charge time span { background: #f4d35e; color: #19211d; }
@@ -207,11 +214,21 @@
     .sync-time-field { min-width: 0; }
     .calibrate .secondary-button { width: 100%; min-width: 0; padding: 0 8px; white-space: normal; overflow-wrap: anywhere; }
     .calibrate > label { grid-column: 1 / -1; display: block; color: var(--muted); font-size: .8rem; }
-    .settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+    .settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 20px; margin-top: 20px; }
+    .settings .field { min-width: 0; }
     .field label { display: block; margin-bottom: 7px; color: var(--muted); font-size: .8rem; }
-    .field input { height: 43px; }
+    .settings .field label { min-height: 2.2em; }
+    .settings .field input { width: 100%; height: 44px; }
     .calibrate .field input { height: 46px; }
     .field-help { margin: 5px 0 0; color: #818e85; font-size: .72rem; line-height: 1.4; }
+    .settings-connection { display: grid; gap: 10px; margin-top: 22px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: #131a16; }
+    .settings-connection label { display: block; color: var(--muted); font-size: .8rem; }
+    .settings-connection input { width: 100%; height: 46px; padding: 0 13px; border: 1px solid var(--line); border-radius: 11px; outline: none; background: #0f1512; color: #f1f5f2; }
+    .settings-connection input:focus { border-color: #77bd89; }
+    .settings-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .settings-actions .secondary-button { width: 100%; min-height: 44px; padding: 8px 12px; white-space: normal; line-height: 1.3; }
+    .settings-connection .field-help { margin: 0; }
+    .settings-connection .field-help:empty { display: none; }
     .notice { margin: 16px 0 0; color: #aeb9b1; font-size: .78rem; line-height: 1.5; }
     .notice strong { color: #d7e0d9; }
     @media (max-width: 440px) {
@@ -224,9 +241,16 @@
       .card { padding: 18px; }
       .battery { height: 140px; }
       .settings { grid-template-columns: 1fr; gap: 12px; }
+      .settings .field label { min-height: 0; }
+      .settings-connection { margin-top: 18px; padding: 14px; }
+      .settings-actions { grid-template-columns: 1fr; gap: 8px; }
       .controls { gap: 6px; }
       .mode-button { padding: 0 4px; font-size: .84rem; }
-      .settings-dialog { padding: 18px; }
+      .settings-dialog {
+        width: calc(100% - 24px);
+        max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        padding: 18px;
+      }
       .stats-dialog { padding: 38px 18px; }
     }
   </style>
@@ -246,7 +270,10 @@
         </button>
         <span class="visually-hidden" id="battery-meter" role="meter" aria-label="Розрахунковий заряд батареї" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"></span>
       </div>
-      <div class="mode-label" id="mode-label" aria-live="polite"></div>
+      <div class="mode-label" id="mode-label" aria-live="polite">
+        <span id="mode-description"></span>
+        <span class="backend-percent" id="backend-percent">Бекенд: не синхронізовано</span>
+      </div>
       <p class="backend-status" id="backend-status" role="status" aria-live="polite"></p>
       <div class="time-card">
         <div>
@@ -257,7 +284,7 @@
       </div>
       <div class="stats-summary" aria-label="Прогноз часу досягнення рівня заряду" aria-live="polite">
         <p><span>100%:</span><span id="full-charge-label">—</span><time id="full-charge-estimate"></time></p>
-        <p class="low-charge"><span>30%:</span><span id="low-charge-label">—</span><time id="low-charge-estimate"></time></p>
+        <p class="low-charge"><select class="threshold-select" id="alert-threshold" aria-label="Поріг автоматичного ввімкнення заряджання" title="Оберіть поріг автоматичного ввімкнення заряджання"></select><span id="low-charge-label">—</span><time id="low-charge-estimate"></time></p>
       </div>
       <div class="controls" role="group" aria-label="Режим повербанка">
         <button class="mode-button" type="button" data-mode="discharging" aria-pressed="false">Живить пристрої</button>
@@ -309,17 +336,23 @@
         <p class="field-help">Орієнтир за вашим спостереженням: 4%/год.</p>
       </div>
       <div class="field">
-        <label for="api-token">Ключ доступу до бекенду</label>
-        <input id="api-token" type="password" autocomplete="current-password">
-        <p class="field-help">Значення API_TOKEN з backend/.env зберігається в цьому браузері.</p>
-        <button class="secondary-button" id="save-api-token" type="button">Під’єднати сервер</button>
-      </div>
-      <div class="field">
         <label for="charge-watts">Потужність зарядки (Вт)</label>
         <input id="charge-watts" type="number" min="1" max="10000" step="1">
         <p class="field-help">Інформаційне значення для вашого зарядного пристрою.</p>
       </div>
     </div>
+    <section class="settings-connection" aria-label="Підключення до бекенду">
+      <label for="api-token">Ключ доступу до бекенду</label>
+      <input id="api-token" type="password" autocomplete="current-password">
+      <p class="field-help">Значення API_TOKEN з backend/.env зберігається в цьому браузері.</p>
+      <div class="settings-actions">
+        <button class="secondary-button" id="save-api-token" type="button">Під’єднати сервер</button>
+        <button class="secondary-button" id="reset-api-token" type="button">Скинути збережений токен</button>
+        <button class="secondary-button" id="send-test-webhook" type="button">Надіслати тестовий webhook</button>
+      </div>
+      <p class="field-help" id="api-token-status" role="status" aria-live="polite"></p>
+      <p class="field-help" id="webhook-test-status" role="status" aria-live="polite"></p>
+    </section>
     <p class="notice">Під час заряджання з навантаженням прогноз віднімає витрати пристроїв від темпу зарядки. За вашими оцінками: близько 40% заряду/год заряджання мінус 4%/год споживання = близько 36%/год. Повербанк може обмежувати наскрізне живлення; фактичний результат залежить від її електроніки.</p>
   </dialog>
 
@@ -342,7 +375,8 @@
         capacity: 192,
         chargeHours: 2.5,
         loadRate: 4,
-        chargeWatts: 97
+        chargeWatts: 97,
+        alertThresholdPercent: 30
       };
       const storageKey = "power-bank-monitor-v1";
       const apiTokenStorageKey = "power-bank-monitor-api-token-v1";
@@ -350,16 +384,50 @@
       const backendStatus = $("backend-status");
       const apiTokenInput = $("api-token");
       apiTokenInput.value = localStorage.getItem(apiTokenStorageKey) || "";
+      let backendTokenValidated = false;
+      const showBackendError = (error, operation) => {
+        backendTokenValidated = false;
+        const message = error instanceof Error ? error.message : String(error);
+        const statusCode = message.match(/API returned HTTP (\d+)/)?.[1];
+        if (statusCode === "401") {
+          backendStatus.textContent = "Бекенд відхилив ключ (HTTP 401). Перезапустіть його та перевірте API_TOKEN у backend/.env.";
+        } else if (statusCode) {
+          backendStatus.textContent = `Помилка бекенду HTTP ${statusCode}. Перевірте його журнали.`;
+        } else {
+          backendStatus.textContent = "Не вдалося з’єднатися з бекендом. Перевірте адресу API, доступ до мережі та CORS.";
+        }
+        console.error(`Не вдалося ${operation}:`, error);
+      };
       const readState = () => {
         try {
           const stored = JSON.parse(localStorage.getItem(storageKey) || "{}");
-          return { ...defaults, ...stored };
+          const savedState = { ...defaults, ...stored };
+          const threshold = Number(savedState.alertThresholdPercent);
+          savedState.alertThresholdPercent = Number.isFinite(threshold) && threshold >= 0 && threshold <= 100
+            ? threshold
+            : defaults.alertThresholdPercent;
+          return savedState;
         } catch (error) {
           console.error("Не вдалося завантажити збережені параметри:", error);
           return { ...defaults };
         }
       };
       let state = readState();
+      let backendPercent = null;
+      const thresholdInput = $("alert-threshold");
+      const setThresholdOptions = (selectedThreshold) => {
+        const options = Array.from({ length: 19 }, (_, index) => (index + 1) * 5);
+        if (!options.includes(selectedThreshold)) options.push(selectedThreshold);
+        options.sort((left, right) => left - right);
+        thresholdInput.replaceChildren(...options.map((percent) => {
+          const option = document.createElement("option");
+          option.value = String(percent);
+          option.textContent = `${percent}%:`;
+          return option;
+        }));
+        thresholdInput.value = String(selectedThreshold);
+      };
+      setThresholdOptions(state.alertThresholdPercent);
       const fullChargeTimeInput = $("full-charge-time");
       const percentInput = $("manual-percent");
       const settingsDialog = $("settings-dialog");
@@ -370,19 +438,54 @@
         loadRate: $("load-rate"),
         chargeWatts: $("charge-watts")
       };
-
-      const save = () => {
+      const applyBackendState = (remoteState) => {
+        backendPercent = remoteState.percent;
+        state = {
+          ...defaults,
+          percent: remoteState.percent,
+          mode: remoteState.mode,
+          updatedAt: remoteState.updated_at_ms,
+          capacity: remoteState.capacity,
+          chargeHours: remoteState.charge_hours,
+          loadRate: remoteState.load_rate,
+          chargeWatts: remoteState.charge_watts,
+          alertThresholdPercent: remoteState.alert_threshold_percent
+        };
+        setThresholdOptions(state.alertThresholdPercent);
+        Object.entries(inputs).forEach(([key, input]) => {
+          input.value = state[key];
+        });
         try {
           localStorage.setItem(storageKey, JSON.stringify(state));
         } catch (error) {
           console.error("Не вдалося зберегти параметри:", error);
         }
-        void syncState();
+        render();
+      };
+
+      const save = ({ manualModeChange = false } = {}) => {
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(state));
+        } catch (error) {
+          console.error("Не вдалося зберегти параметри:", error);
+        }
+        void syncState(manualModeChange);
       };
       let syncQueue = Promise.resolve();
-      const syncState = () => {
-        const snapshot = { ...state };
+      const syncState = (manualModeChange = false) => {
+        const token = localStorage.getItem(apiTokenStorageKey) || "";
+        if (!token || !backendTokenValidated) return;
+
         syncQueue = syncQueue.then(async () => {
+          if (
+            !backendTokenValidated ||
+            localStorage.getItem(apiTokenStorageKey) !== token ||
+            apiTokenInput.value.trim() !== token
+          ) {
+            return;
+          }
+
+          const snapshot = { ...state };
           const response = await fetch(`${apiBaseUrl}/api/state`, {
             method: "PUT",
             headers: {
@@ -395,22 +498,33 @@
               capacity: snapshot.capacity,
               charge_hours: snapshot.chargeHours,
               load_rate: snapshot.loadRate,
-              charge_watts: snapshot.chargeWatts
+              charge_watts: snapshot.chargeWatts,
+              alert_threshold_percent: snapshot.alertThresholdPercent,
+              manual_mode_change: manualModeChange
             })
           });
           if (!response.ok) throw new Error(`API returned HTTP ${response.status}`);
+          applyBackendState(await response.json());
           backendStatus.textContent = "";
         }).catch((error) => {
-          backendStatus.textContent = "Бекенд недоступний або ключ некоректний; сповіщення Home Assistant не гарантовані.";
-          console.error("Не вдалося синхронізувати стан із бекендом:", error);
+          showBackendError(error, "синхронізувати стан із бекендом");
         });
       };
       const loadBackendState = async () => {
+        const token = localStorage.getItem(apiTokenStorageKey) || "";
+        if (!token) {
+          backendTokenValidated = false;
+          backendStatus.textContent = "";
+          return;
+        }
+
+        backendTokenValidated = false;
         try {
           const response = await fetch(`${apiBaseUrl}/api/state`, {
             headers: { "Authorization": `Bearer ${apiTokenInput.value}` }
           });
           if (!response.ok) throw new Error(`API returned HTTP ${response.status}`);
+          backendTokenValidated = true;
           const remoteState = await response.json();
           if (!remoteState.initialized) {
             updateProgress(Date.now());
@@ -418,25 +532,10 @@
             render();
             return;
           }
-          state = {
-            ...defaults,
-            percent: remoteState.percent,
-            mode: remoteState.mode,
-            updatedAt: remoteState.updated_at_ms,
-            capacity: remoteState.capacity,
-            chargeHours: remoteState.charge_hours,
-            loadRate: remoteState.load_rate,
-            chargeWatts: remoteState.charge_watts
-          };
-          Object.entries(inputs).forEach(([key, input]) => {
-            input.value = state[key];
-          });
-          localStorage.setItem(storageKey, JSON.stringify(state));
+          applyBackendState(remoteState);
           backendStatus.textContent = "";
-          render();
         } catch (error) {
-          backendStatus.textContent = "Бекенд недоступний або ключ некоректний; сповіщення Home Assistant не гарантовані.";
-          console.error("Не вдалося завантажити стан із бекенду:", error);
+          showBackendError(error, "завантажити стан із бекенду");
         }
       };
       const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -462,7 +561,8 @@
       };
       const renderEstimates = (currentPercent, now) => {
         const fullChargeTime = getEstimatedTime(100, currentPercent, now);
-        const lowChargeTime = getEstimatedTime(30, currentPercent, now);
+        const lowChargeTime = getEstimatedTime(state.alertThresholdPercent, currentPercent, now);
+        thresholdInput.value = String(state.alertThresholdPercent);
         const renderEstimate = (labelId, timeId, timestamp, status) => {
           const label = $(labelId);
           const time = $(timeId);
@@ -504,7 +604,7 @@
         renderEstimates(currentPercent, now);
         Array.from({ length: 10 }, (_, index) => 100 - index * 10).forEach((percent) => {
           const row = document.createElement("li");
-          row.className = `stats-entry${percent === 30 ? " low-charge" : ""}`;
+          row.className = `stats-entry${percent === state.alertThresholdPercent ? " low-charge" : ""}`;
           const level = document.createElement("span");
           level.textContent = `${percent}%`;
           const time = document.createElement("time");
@@ -543,9 +643,12 @@
         $("percent").textContent = `${rounded}%`;
         $("capacity-label").textContent = state.capacity;
         meter.setAttribute("aria-valuenow", String(rounded));
-        $("mode-label").innerHTML = state.mode === "charging"
+        $("mode-description").innerHTML = state.mode === "charging"
           ? "⚡ <strong>Заряджається</strong>"
           : state.mode === "discharging" ? "↘ <strong>Живить пристрої</strong>" : "На паузі";
+        $("backend-percent").textContent = backendPercent === null
+          ? "Бекенд: не синхронізовано"
+          : `Бекенд: ${Math.round(backendPercent)}%`;
         $("time-icon").textContent = state.mode === "discharging" ? "🔌" : "⚡";
         if (state.mode === "charging") {
           const netRate = 100 / state.chargeHours - state.loadRate;
@@ -585,9 +688,20 @@
           const now = Date.now();
           updateProgress(now);
           state.mode = button.dataset.mode;
-          save();
+          save({ manualModeChange: true });
           render();
         });
+      });
+
+      thresholdInput.addEventListener("change", () => {
+        const threshold = Number(thresholdInput.value);
+        if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
+          setThresholdOptions(state.alertThresholdPercent);
+          return;
+        }
+        state.alertThresholdPercent = threshold;
+        save();
+        render();
       });
 
       $("open-settings").addEventListener("click", () => settingsDialog.showModal());
@@ -604,7 +718,56 @@
         localStorage.setItem(apiTokenStorageKey, token);
         void loadBackendState();
       });
-      apiTokenInput.addEventListener("input", () => apiTokenInput.setCustomValidity(""));
+      $("reset-api-token").addEventListener("click", () => {
+        localStorage.removeItem(apiTokenStorageKey);
+        backendTokenValidated = false;
+        apiTokenInput.value = "";
+        apiTokenInput.setCustomValidity("");
+        backendStatus.textContent = "";
+        $("api-token-status").textContent = "Збережений токен очищено в цьому браузері. Токен бекенду не змінено.";
+      });
+      $("send-test-webhook").addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        const token = localStorage.getItem(apiTokenStorageKey) || "";
+        const status = $("webhook-test-status");
+        if (!token || !backendTokenValidated) {
+          status.textContent = "Спочатку під’єднайте бекенд за допомогою API_TOKEN.";
+          return;
+        }
+        if (!window.confirm("Надіслати тестову подію в Home Assistant? Налаштована автоматизація може виконати свої дії.")) {
+          return;
+        }
+
+        button.disabled = true;
+        status.textContent = "Надсилання тестового webhook...";
+        try {
+          const response = await fetch(`${apiBaseUrl}/api/webhook/test`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${token}` }
+          });
+          if (!response.ok) {
+            let detail = `HTTP ${response.status}`;
+            try {
+              const body = await response.json();
+              if (body.detail) detail = body.detail;
+            } catch (error) {
+              console.error("Не вдалося прочитати помилку відповіді webhook:", error);
+            }
+            throw new Error(detail);
+          }
+          status.textContent = "Тестовий webhook успішно прийнято Home Assistant.";
+        } catch (error) {
+          status.textContent = `Не вдалося надіслати webhook: ${error.message}`;
+          console.error("Помилка тестового webhook:", error);
+        } finally {
+          button.disabled = false;
+        }
+      });
+      apiTokenInput.addEventListener("input", () => {
+        apiTokenInput.setCustomValidity("");
+        backendTokenValidated = false;
+        $("api-token-status").textContent = "";
+      });
       $("open-statistics").addEventListener("click", () => {
         renderStatistics();
         statisticsDialog.showModal();

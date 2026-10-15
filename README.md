@@ -7,27 +7,32 @@ threshold while discharging.
 
 ## Local development
 
-Run these commands in PowerShell from the `backend` directory:
+Create `backend/.env` from `backend/.env.example` if it does not exist, and set
+`API_TOKEN` to a random value of at least 32 characters. Then run the backend
+in PowerShell:
 
 ```powershell
-py -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-$env:API_TOKEN = "replace-with-a-random-secret-at-least-32-characters"
-$env:STATE_FILE = Join-Path $env:TEMP "battery-local-state.json"
-$env:HA_WEBHOOK_URL = ""
-$env:CORS_ORIGINS = "http://127.0.0.1:5500"
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+Set-Location 'K:\A_SERVER_CONFIG\battery-monitor\backend'
+.\run-local.ps1
 ```
 
-Serve `index.html` in a second PowerShell window from the repository root:
+`run-local.ps1` reads `API_TOKEN` from `.env`, listens on `127.0.0.1:8000`,
+reads `HA_WEBHOOK_URL` from `.env`, and stores test state in the system
+temporary directory. Local tests can send real notifications to Home Assistant;
+an already-pending alert is delivered when the backend starts. It stops with a
+clear message if another process already uses port `8000`. In a second
+PowerShell window, serve `index.html` from the repository root:
 
 ```powershell
 py -m http.server 5500 --bind 127.0.0.1
 ```
 
-Open <http://127.0.0.1:5500/index.html>, enter the same API token in
-**Settings**, and select **Connect server**. The local webhook is intentionally
-disabled in this example.
+Open <http://127.0.0.1:5500/index.html>, enter the `API_TOKEN` from
+`backend/.env` in **Settings**, and select **Connect server**. Change the
+automatic charging threshold by selecting its percentage in the battery level
+forecast. When the battery reaches that threshold while discharging, the
+backend sends the Home Assistant webhook; after it succeeds, the app switches
+to charging mode.
 
 ## Docker deployment
 
