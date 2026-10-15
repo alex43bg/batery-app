@@ -61,11 +61,37 @@ if ($listener) {
 $env:API_TOKEN = $apiToken
 $env:STATE_FILE = Join-Path $env:TEMP "battery-local-state.json"
 $env:HA_WEBHOOK_URL = $webhookUrl
-$env:CORS_ORIGINS = "http://127.0.0.1:5500"
+$frontendOrigins = [System.Collections.Generic.List[string]]::new()
+$frontendOrigins.Add("http://127.0.0.1:5500")
+$frontendOrigins.Add("http://localhost:5500")
+$lanAddresses = [System.Collections.Generic.List[string]]::new()
+foreach ($configuration in Get-NetIPConfiguration) {
+    if ($configuration.NetAdapter.Status -ne "Up") {
+        continue
+    }
+
+    foreach ($address in $configuration.IPv4Address) {
+        $octets = $address.IPAddress.Split(".") | ForEach-Object { [int]$_ }
+        $isPrivate = (
+            $octets[0] -eq 10 -or
+            ($octets[0] -eq 172 -and $octets[1] -ge 16 -and $octets[1] -le 31) -or
+            ($octets[0] -eq 192 -and $octets[1] -eq 168)
+        )
+        if ($isPrivate) {
+            $lanAddresses.Add($address.IPAddress)
+            $frontendOrigins.Add("http://$($address.IPAddress):5500")
+        }
+    }
+}
+$env:CORS_ORIGINS = ($frontendOrigins | Sort-Object -Unique) -join ","
 
 Push-Location $PSScriptRoot
 try {
-    & $python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+    foreach ($address in ($lanAddresses | Sort-Object -Unique)) {
+        Write-Host "Backend available at http://${address}:8000"
+        Write-Host "Frontend should be available at http://${address}:5500/index.html"
+    }
+    & $python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
     if ($LASTEXITCODE -ne 0) {
         throw "Uvicorn exited with code $LASTEXITCODE."
     }

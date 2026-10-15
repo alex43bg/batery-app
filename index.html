@@ -364,7 +364,10 @@
     <ol class="stats-list" id="statistics-list" aria-live="polite"></ol>
     <p class="stats-empty">Орієнтовний час розраховано за вказаним споживанням.</p>
   </dialog>
-  <script>window.BATTERY_API_URL = "http://127.0.0.1:8000";</script>
+  <script>
+    window.BATTERY_API_URL = window.BATTERY_API_URL ||
+      `${window.location.protocol}//${window.location.hostname}:8000`;
+  </script>
   <script>
     (() => {
       const apiBaseUrl = (window.BATTERY_API_URL || "").replace(/\/+$/, "");
@@ -472,10 +475,13 @@
         void syncState(manualModeChange);
       };
       let syncQueue = Promise.resolve();
+      let pendingStateSyncs = 0;
+      let backendLoadInProgress = false;
       const syncState = (manualModeChange = false) => {
         const token = localStorage.getItem(apiTokenStorageKey) || "";
-        if (!token || !backendTokenValidated) return;
+        if (!token || !backendTokenValidated) return Promise.resolve();
 
+        pendingStateSyncs += 1;
         syncQueue = syncQueue.then(async () => {
           if (
             !backendTokenValidated ||
@@ -508,17 +514,22 @@
           backendStatus.textContent = "";
         }).catch((error) => {
           showBackendError(error, "синхронізувати стан із бекендом");
+        }).finally(() => {
+          pendingStateSyncs -= 1;
         });
+        return syncQueue;
       };
       const loadBackendState = async () => {
+        if (backendLoadInProgress) return;
         const token = localStorage.getItem(apiTokenStorageKey) || "";
         if (!token) {
           backendTokenValidated = false;
           backendStatus.textContent = "";
           return;
         }
+        if (apiTokenInput.value.trim() !== token) return;
 
-        backendTokenValidated = false;
+        backendLoadInProgress = true;
         try {
           const response = await fetch(`${apiBaseUrl}/api/state`, {
             headers: { "Authorization": `Bearer ${apiTokenInput.value}` }
@@ -526,6 +537,9 @@
           if (!response.ok) throw new Error(`API returned HTTP ${response.status}`);
           backendTokenValidated = true;
           const remoteState = await response.json();
+          if (pendingStateSyncs > 0 || localStorage.getItem(apiTokenStorageKey) !== token) {
+            return;
+          }
           if (!remoteState.initialized) {
             updateProgress(Date.now());
             await syncState();
@@ -536,6 +550,8 @@
           backendStatus.textContent = "";
         } catch (error) {
           showBackendError(error, "завантажити стан із бекенду");
+        } finally {
+          backendLoadInProgress = false;
         }
       };
       const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -706,6 +722,7 @@
 
       $("open-settings").addEventListener("click", () => settingsDialog.showModal());
       $("close-settings").addEventListener("click", () => settingsDialog.close());
+      settingsDialog.addEventListener("close", () => void loadBackendState());
       $("save-api-token").addEventListener("click", () => {
         const token = apiTokenInput.value.trim();
         if (token.length < 32) {
@@ -773,6 +790,7 @@
         statisticsDialog.showModal();
       });
       $("close-statistics").addEventListener("click", () => statisticsDialog.close());
+      statisticsDialog.addEventListener("close", () => void loadBackendState());
       settingsDialog.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -827,10 +845,24 @@
       void loadBackendState();
       window.setInterval(() => {
         updateProgress(Date.now());
-        save();
         render();
-      }, 15000);
+        if (!document.hidden && !settingsDialog.open && !statisticsDialog.open) {
+          void loadBackendState();
+        }
+      }, 5000);
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) void loadBackendState();
+      });
       window.addEventListener("storage", (event) => {
+        if (event.key === apiTokenStorageKey) {
+          if (document.activeElement !== apiTokenInput) {
+            apiTokenInput.value = event.newValue || "";
+          }
+          if (apiTokenInput.value.trim() === (event.newValue || "")) {
+            void loadBackendState();
+          }
+          return;
+        }
         if (event.key === storageKey) {
           state = readState();
           render();
